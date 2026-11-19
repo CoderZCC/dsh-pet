@@ -164,11 +164,13 @@ Object.assign(PetSprite.prototype, {
     if (this.animations.moves.actions.some((a) => a.name === leaf.anim)) {
       const moved = this.tryMove(leaf.anim, playbackId);
       if (moved === false) this.playOnce(leaf.anim, playbackId);
+      if (moved !== true) this.manualAnimation = true;
       // moved === true = 已有移动/抛掷在进行中（没换源）：本段不会真的播起来 → 如实回 failed/busy
       else if (moved === true && playbackId) this.reportPlayback(playbackId, 'failed', 'busy');
       return;
     }
     this.playOnce(leaf.anim, playbackId);
+    this.manualAnimation = true;
   },
 
   closeMenu() {

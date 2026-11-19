@@ -12,6 +12,7 @@ Object.assign(PetSprite.prototype, {
     if (!next) return;
     // 「当前在播哪一段」只在这里写：ended 分流、回空闲补丁、随机链避重都读它。
     // 交给调用方维护时 switchTo(x, false) 会留下过期值，events.js 判「是不是工作动画」就永远不成立。
+    this.manualAnimation = false;
     this.anim = next;
     this.once = !nextOnce;
     const pending = this.pending;
@@ -48,11 +49,14 @@ Object.assign(PetSprite.prototype, {
       if (!this.pending || this.pending.gen !== gen) return;
       this.pending = null;
       console.warn('[dsh-pet] 素材加载失败 pet=' + this.pet.id + ' anim=' + next + '：' + why + '（已释放本次切换）');
+      const wasManual = this.manualAnimation;
+      this.manualAnimation = false;
       // 播放回执：这一段没能播起来 → 如实回 failed（而不是让调用方干等到 timeout）
       if (playbackId) {
         if (this.playback === playbackId) this.playback = null;
         this.reportPlayback(playbackId, 'failed', why === 'video error' ? 'decode-error' : 'asset-load');
       }
+      if (wasManual && !this.finishManualAnimation()) this.playIdle();
     };
     const loadTimer = window.setTimeout(() => loadGuard('10s 超时'), 10000);
     el.onerror = () => {
@@ -80,6 +84,10 @@ Object.assign(PetSprite.prototype, {
       this.front = this.front === 0 ? 1 : 0;
       this.pending = null;
       this.playback = playbackId || null;
+      if (this.deferredWork && !this.manualAnimation) {
+        el.loop = false;
+        el.onended = () => this.handleEnded();
+      }
       el.style.transform = this.facing === 'right' ? 'scaleX(-1)' : '';
       el.play()
         .then(() => {
@@ -88,9 +96,11 @@ Object.assign(PetSprite.prototype, {
         })
         .catch(() => {
           // 自动播放被拒 / 元素不可播：如实回 failed，不改播放控制
-          if (!playbackId) return;
-          if (this.playback === playbackId) this.playback = null;
-          this.reportPlayback(playbackId, 'failed', 'play-rejected');
+          if (playbackId) {
+            if (this.playback === playbackId) this.playback = null;
+            this.reportPlayback(playbackId, 'failed', 'play-rejected');
+          }
+          if (this.gen === gen && this.manualAnimation && !this.finishManualAnimation()) this.playIdle();
         });
       // 点击 Q 弹：等新动画就位后才压（压的是新点击动画的首帧，与浏览器一致）
       if (this.pendingSquash) {
@@ -124,6 +134,7 @@ Object.assign(PetSprite.prototype, {
   playUrlOnce(url, playbackId) {
     this.stopMove();
     this.playOnce(url, playbackId, url);
+    this.manualAnimation = true;
   },
 
   /**
@@ -285,7 +296,25 @@ Object.assign(PetSprite.prototype, {
     this.playOnce(next);
   },
 
+  // 工作状态在手动动画期间合并为最新一条；复用正常入口处理终态、清空和气泡。
+  finishManualAnimation() {
+    this.manualAnimation = false;
+    const deferred = this.deferredWork;
+    this.deferredWork = null;
+    if (!deferred || this.frozen || this.sleeping) return false;
+    this.prevWorkTick = -1;
+    this.applyingDeferredWork = true;
+    try {
+      this.onWorkTick(deferred.snapshot, deferred.tick);
+    } finally {
+      this.applyingDeferredWork = false;
+    }
+    return Boolean(deferred.snapshot && deferred.snapshot.state);
+  },
+
   handleEnded() {
+    const wasManual = this.manualAnimation;
+    this.manualAnimation = false;
     // 播放回执：前台视频真的播完了 → 如实回 ended。放在拖拽守卫之前——「播完了」是既成事实，
     // 拖拽守卫管的是动画链怎么推进，不该影响回执的准确性。
     if (this.playback) {
@@ -324,6 +353,10 @@ Object.assign(PetSprite.prototype, {
     // 恢复档位」：持锁者每投一次带 anim 的气泡，说话动画播完就把工作状态动画点回来。
     // 播放回执已在上面上报，不受这一行影响。
     if (this.frozen) return;
+    if (wasManual || this.deferredWork) {
+      if (this.finishManualAnimation()) return;
+      if (this.resumeWorkStatusAnim()) return;
+    }
     const { animations } = { animations: this.animations };
     // 事件动画播完：回 idle（与 drag/clicks 同分支，不进随机链）；气泡由定时器自动消失，与动画解耦
     const isEvent = S.isEventAnim(animations.events, this.anim);

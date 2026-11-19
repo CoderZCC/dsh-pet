@@ -21,6 +21,27 @@ PetSprite.prototype.onWorkTick = function onWorkTick(snapshot, tick) {
   if (this.frozen) return;
   const state = snapshot && snapshot.state ? snapshot.state : null;
   this.workState = state; // 当前工作状态：互动/事件动画播完恢复档位循环用
+  // 手动点播拥有当前动画；工作事件只保留最新快照，播完再应用（包括终态和清空）。
+  if (this.manualAnimation) {
+    this.deferredWork = { snapshot, tick };
+    return;
+  }
+  // 自动工作动画也播完当前段再切状态，避免工具 hooks 在 thinking/working 间快速换源闪动。
+  const frontVideo = this.front === 0 ? this.videoA : this.videoB;
+  if (
+    !this.applyingDeferredWork &&
+    (state !== this.prevWorkState || this.deferredWork) &&
+    S.poolIncludes(this.animations.events?.workStatus ?? [], this.anim) &&
+    (frontVideo || this.pending)
+  ) {
+    this.deferredWork = { snapshot, tick };
+    if (frontVideo && !this.pending) {
+      frontVideo.loop = false;
+      frontVideo.onended = () => this.handleEnded();
+    }
+    return;
+  }
+  this.deferredWork = null;
   // 当前展示条目所属会话：点气泡跳过去要用它。外部槽（`api`）宿主已写成 null，这里只认非空串。
   this.workSessionId =
     snapshot && typeof snapshot.sessionId === 'string' && snapshot.sessionId ? snapshot.sessionId : null;
@@ -71,7 +92,6 @@ PetSprite.prototype.onWorkTick = function onWorkTick(snapshot, tick) {
       '] ' +
       name,
   );
-  this.stopMove();
   // 气泡文本：任务详情优先，否则从条目级 workStatusTexts[档位] 随机抽一句；整档缺失则只播动画。
   const textGroup = Array.isArray(this.pet.workStatusTexts) ? this.pet.workStatusTexts[idx] : undefined;
   const configuredText =
@@ -94,6 +114,9 @@ PetSprite.prototype.onWorkTick = function onWorkTick(snapshot, tick) {
   this.renderBubble();
   // 睡觉：气泡与 workState 已经更新，动画不换——自动来源不该打断睡姿（睡姿循环归睡觉状态机）。
   if (this.sleeping) return;
+  // 同档位只更新文案，不重抽、不重播；终态也不能因重复 Stop 反复闪回首帧。
+  if (!stateChanged && !this.applyingDeferredWork) return;
+  this.stopMove();
   // 循环语义：终态播一遍回 idle；非终态多候选档位播一遍 → ended 轮换到下一候选；
   // 非终态单候选档位无限循环。
   const rotating = !terminal && Array.isArray(slot) && slot.length > 1;
