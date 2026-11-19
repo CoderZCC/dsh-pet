@@ -1,5 +1,7 @@
 # dsh-pet 🐾
 
+Claude Code 任务联动：通过 hooks 显示思考、工作、等待与完成状态，见 [接入说明](tools/claude-code/README.md)。
+
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-pet"><img alt="npm version" src="https://img.shields.io/npm/v/dsh-pet?label=npm&color=blue"></a>
   <a href="https://www.npmjs.com/package/dsh-pet"><img alt="npm monthly downloads" src="https://img.shields.io/npm/dm/dsh-pet?label=%E6%9C%88%E4%B8%8B%E8%BD%BD&color=brightgreen"></a>
